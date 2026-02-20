@@ -1,158 +1,88 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import ResourceCard from '@/components/ResourceCard';
+import RatingModal from '@/components/RatingModal';
+import LoadingSkeleton from '@/components/LoadingSkeleton';
 import { Resource } from '@/lib/types';
-
-// Demo search results
-const allResources: Resource[] = [
-    {
-        id: 'res-001',
-        filename: 'golang_tutorial.pdf',
-        extension: '.pdf',
-        size: 2500000,
-        type: 'pdf',
-        title: 'Go Programming Fundamentals',
-        description: 'Complete guide to Go programming',
-        subject: 'Computer Science',
-        tags: ['golang', 'programming', 'tutorial'],
-        uploaded_by: 'alice',
-        available_on: ['peer1', 'peer2', 'peer3'],
-        total_ratings: 15,
-        average_rating: 4.7,
-        created_at: '2024-01-15',
-        updated_at: '2024-01-15',
-        download_count: 45
-    },
-    {
-        id: 'res-002',
-        filename: 'data_structures.pdf',
-        extension: '.pdf',
-        size: 3200000,
-        type: 'pdf',
-        title: 'Data Structures and Algorithms',
-        description: 'DSA comprehensive notes',
-        subject: 'Computer Science',
-        tags: ['algorithms', 'dsa', 'programming'],
-        uploaded_by: 'alice',
-        available_on: ['peer1', 'peer2'],
-        total_ratings: 22,
-        average_rating: 4.9,
-        created_at: '2024-01-10',
-        updated_at: '2024-01-10',
-        download_count: 78
-    },
-    {
-        id: 'res-003',
-        filename: 'calculus_notes.pdf',
-        extension: '.pdf',
-        size: 1800000,
-        type: 'pdf',
-        title: 'Calculus Complete Notes',
-        description: 'Full calculus course notes',
-        subject: 'Mathematics',
-        tags: ['calculus', 'math', 'notes'],
-        uploaded_by: 'bob',
-        available_on: ['peer2', 'peer3'],
-        total_ratings: 8,
-        average_rating: 4.2,
-        created_at: '2024-01-12',
-        updated_at: '2024-01-12',
-        download_count: 32
-    },
-    {
-        id: 'res-004',
-        filename: 'networking_basics.pdf',
-        extension: '.pdf',
-        size: 2100000,
-        type: 'pdf',
-        title: 'Computer Networks Basics',
-        description: 'TCP/IP and networking protocols',
-        subject: 'Computer Science',
-        tags: ['networking', 'tcp', 'protocols'],
-        uploaded_by: 'charlie',
-        available_on: ['peer1'],
-        total_ratings: 5,
-        average_rating: 3.8,
-        created_at: '2024-01-08',
-        updated_at: '2024-01-08',
-        download_count: 18
-    }
-];
+import * as api from '@/lib/api';
 
 export default function SearchPage() {
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<Resource[]>([]);
     const [hasSearched, setHasSearched] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
+    const [ratingTarget, setRatingTarget] = useState<Resource | null>(null);
 
-    const handleSearch = () => {
-        if (!query.trim()) {
+    const handleSearch = useCallback(async (q?: string) => {
+        const searchQuery = q || query;
+        if (!searchQuery.trim()) { setResults([]); setHasSearched(false); return; }
+        setLoading(true);
+        try {
+            const data = await api.searchResources(searchQuery);
+            setResults(data.results?.map(r => r.resource) || []);
+        } catch {
             setResults([]);
-            setHasSearched(false);
-            return;
+        } finally {
+            setHasSearched(true);
+            setLoading(false);
         }
+    }, [query]);
 
-        const q = query.toLowerCase();
-        const filtered = allResources.filter(r =>
-            r.title.toLowerCase().includes(q) ||
-            r.subject.toLowerCase().includes(q) ||
-            r.tags.some(t => t.toLowerCase().includes(q)) ||
-            r.description.toLowerCase().includes(q)
-        );
+    // Auto-suggestions
+    useEffect(() => {
+        if (query.length < 2) { setSuggestions([]); return; }
+        const timeout = setTimeout(async () => {
+            try {
+                const s = await api.getSearchSuggestions(query);
+                setSuggestions(s || []);
+            } catch { setSuggestions([]); }
+        }, 300);
+        return () => clearTimeout(timeout);
+    }, [query]);
 
-        // Sort by relevance (title match > subject match > tag match)
-        filtered.sort((a, b) => {
-            const aTitle = a.title.toLowerCase().includes(q) ? 3 : 0;
-            const bTitle = b.title.toLowerCase().includes(q) ? 3 : 0;
-            const aSubject = a.subject.toLowerCase().includes(q) ? 2 : 0;
-            const bSubject = b.subject.toLowerCase().includes(q) ? 2 : 0;
-            return (bTitle + bSubject) - (aTitle + aSubject);
-        });
+    const handleDownload = async (resource: Resource) => {
+        try {
+            await api.downloadResource(resource.id, 'demo-user');
+            setRatingTarget(resource);
+        } catch {
+            alert('Download initiated for ' + resource.title);
+            setRatingTarget(resource);
+        }
+    };
 
-        setResults(filtered);
-        setHasSearched(true);
+    const handleRate = async (rating: number, comment: string) => {
+        if (ratingTarget) {
+            try { await api.rateResource(ratingTarget.id, rating, comment); }
+            catch { /* still close */ }
+        }
     };
 
     return (
         <div className="max-w-5xl mx-auto">
-            {/* Header */}
             <div className="mb-8">
                 <h1 className="text-3xl font-bold text-gray-900">🔍 Search Resources</h1>
-                <p className="text-gray-600 mt-2">
-                    Find academic resources across the peer-to-peer network.
-                </p>
+                <p className="text-gray-600 mt-2">Find academic resources across the peer-to-peer network.</p>
             </div>
 
-            {/* Go Concept Highlight */}
+            {/* Go Concept */}
             <div className="card mb-6 bg-gradient-to-r from-purple-50 to-pink-50 border-purple-200">
                 <div className="flex items-start gap-4">
                     <div className="concept-number shrink-0">2</div>
                     <div>
                         <h3 className="font-semibold text-gray-900">Go Concept: Looping & Control Flow</h3>
                         <p className="text-sm text-gray-600 mt-1">
-                            The search functionality uses <code className="bg-white/50 px-1 rounded">for...range</code> loops
-                            and <code className="bg-white/50 px-1 rounded">if</code> conditions to filter matching resources.
+                            Search uses <code className="bg-white/50 px-1 rounded">for...range</code> loops and
+                            <code className="bg-white/50 px-1 rounded">if</code> conditions to filter resources.
                         </p>
-                        <pre className="mt-2 text-xs bg-white/70 p-2 rounded font-mono">
-                            {`func Search(query string) []*Resource {
-    results := make([]*Resource, 0)
-    for _, resource := range allResources {
-        if strings.Contains(resource.Title, query) {
-            results = append(results, resource)
-        }
-    }
-    return results
-}`}
-                        </pre>
                     </div>
                 </div>
             </div>
 
             {/* Search Box */}
-            <div className="relative mb-8">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xl">
-                    🔍
-                </span>
+            <div className="relative mb-4">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 text-xl">🔍</span>
                 <input
                     type="text"
                     placeholder="Search for resources (e.g., 'golang', 'calculus', 'algorithms')..."
@@ -161,24 +91,30 @@ export default function SearchPage() {
                     onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                     className="search-input"
                 />
-                <button
-                    onClick={handleSearch}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-primary py-2"
-                >
+                <button onClick={() => handleSearch()} className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-primary py-2">
                     Search
                 </button>
             </div>
+
+            {/* Suggestions */}
+            {suggestions.length > 0 && !hasSearched && (
+                <div className="mb-4 flex flex-wrap gap-2">
+                    {suggestions.map(s => (
+                        <button key={s} onClick={() => { setQuery(s); handleSearch(s); }}
+                            className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm hover:bg-blue-100 transition-colors">
+                            {s}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Quick Tags */}
             <div className="mb-6">
                 <p className="text-sm text-gray-500 mb-2">Popular tags:</p>
                 <div className="flex flex-wrap gap-2">
-                    {['golang', 'programming', 'algorithms', 'math', 'physics', 'database'].map(tag => (
-                        <button
-                            key={tag}
-                            onClick={() => { setQuery(tag); handleSearch(); }}
-                            className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 transition-colors"
-                        >
+                    {['golang', 'programming', 'algorithms', 'math', 'physics', 'database', 'ml'].map(tag => (
+                        <button key={tag} onClick={() => { setQuery(tag); handleSearch(tag); }}
+                            className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 transition-colors">
                             #{tag}
                         </button>
                     ))}
@@ -186,22 +122,19 @@ export default function SearchPage() {
             </div>
 
             {/* Results */}
-            {hasSearched && (
+            {loading && <LoadingSkeleton type="card" count={3} />}
+
+            {hasSearched && !loading && (
                 <div>
                     <div className="flex items-center justify-between mb-4">
                         <p className="text-gray-600">
                             Found <span className="font-semibold">{results.length}</span> results for &quot;{query}&quot;
                         </p>
                     </div>
-
                     {results.length > 0 ? (
                         <div className="space-y-4">
                             {results.map(resource => (
-                                <ResourceCard
-                                    key={resource.id}
-                                    resource={resource}
-                                    onDownload={() => alert(`Downloading ${resource.title}...`)}
-                                />
+                                <ResourceCard key={resource.id} resource={resource} onDownload={() => handleDownload(resource)} />
                             ))}
                         </div>
                     ) : (
@@ -214,13 +147,19 @@ export default function SearchPage() {
                 </div>
             )}
 
-            {!hasSearched && (
+            {!hasSearched && !loading && (
                 <div className="text-center py-12 text-gray-500">
                     <p className="text-6xl mb-4">📚</p>
                     <p className="text-lg">Enter a search term to find resources</p>
-                    <p className="text-sm mt-2">Search by title, subject, or tags</p>
                 </div>
             )}
+
+            <RatingModal
+                isOpen={!!ratingTarget}
+                resourceTitle={ratingTarget?.title || ''}
+                onClose={() => setRatingTarget(null)}
+                onRate={handleRate}
+            />
         </div>
     );
 }

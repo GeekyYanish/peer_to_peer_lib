@@ -10,7 +10,7 @@ package services
 
 import (
 	"testing"
-	
+
 	"p2p-library/models"
 	"p2p-library/store"
 )
@@ -74,7 +74,7 @@ func TestCalculateReputation(t *testing.T) {
 			expected:  100*2 - 10 + int(5.0*10), // 200 - 10 + 50 = 240
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := CalculateReputation(tt.uploads, tt.downloads, tt.avgRating)
@@ -91,14 +91,14 @@ func TestUpdateReputationByValue(t *testing.T) {
 		ID:         "test-user",
 		Reputation: 0,
 	}
-	
+
 	// Call by value - original should NOT change
 	modified := UpdateReputationByValue(original, 10)
-	
+
 	if original.Reputation != 0 {
 		t.Errorf("Original changed, got %d, want 0", original.Reputation)
 	}
-	
+
 	if modified.Reputation != 10 {
 		t.Errorf("Modified wrong, got %d, want 10", modified.Reputation)
 	}
@@ -109,10 +109,10 @@ func TestUpdateReputationByPointer(t *testing.T) {
 		ID:         "test-user",
 		Reputation: 0,
 	}
-	
+
 	// Call by reference - original SHOULD change
 	UpdateReputationByPointer(user, 10)
-	
+
 	if user.Reputation != 10 {
 		t.Errorf("User not modified, got %d, want 10", user.Reputation)
 	}
@@ -124,21 +124,21 @@ func TestUpdateReputationByPointer(t *testing.T) {
 
 func TestCreateUser(t *testing.T) {
 	service, _ := setupUserTest()
-	
+
 	user, err := service.CreateUser("testuser", "test@example.com", "password123")
-	
+
 	if err != nil {
 		t.Fatalf("CreateUser failed: %v", err)
 	}
-	
+
 	if user.Username != "testuser" {
 		t.Errorf("Username = %s; want testuser", user.Username)
 	}
-	
+
 	if user.Email != "test@example.com" {
 		t.Errorf("Email = %s; want test@example.com", user.Email)
 	}
-	
+
 	if user.Classification != models.ClassNeutral {
 		t.Errorf("Classification = %s; want Neutral", user.Classification)
 	}
@@ -146,17 +146,17 @@ func TestCreateUser(t *testing.T) {
 
 func TestGetUser(t *testing.T) {
 	service, _ := setupUserTest()
-	
+
 	// Create a user first
 	created, _ := service.CreateUser("testuser", "test@example.com", "password")
-	
+
 	// Get the user
 	got, err := service.GetUser(created.ID)
-	
+
 	if err != nil {
 		t.Fatalf("GetUser failed: %v", err)
 	}
-	
+
 	if got.ID != created.ID {
 		t.Errorf("ID mismatch: got %s, want %s", got.ID, created.ID)
 	}
@@ -164,20 +164,20 @@ func TestGetUser(t *testing.T) {
 
 func TestRecordUpload(t *testing.T) {
 	service, _ := setupUserTest()
-	
+
 	user, _ := service.CreateUser("uploader", "up@test.com", "pass")
-	
+
 	err := service.RecordUpload(user.ID)
 	if err != nil {
 		t.Fatalf("RecordUpload failed: %v", err)
 	}
-	
+
 	updated, _ := service.GetUser(user.ID)
-	
+
 	if updated.TotalUploads != 1 {
 		t.Errorf("TotalUploads = %d; want 1", updated.TotalUploads)
 	}
-	
+
 	if updated.Reputation <= 0 {
 		t.Errorf("Reputation should increase after upload: %d", updated.Reputation)
 	}
@@ -185,38 +185,39 @@ func TestRecordUpload(t *testing.T) {
 
 func TestRecordDownload(t *testing.T) {
 	service, _ := setupUserTest()
-	
+
 	// Create user with some uploads first
 	user, _ := service.CreateUser("downloader", "down@test.com", "pass")
 	service.RecordUpload(user.ID)
 	service.RecordUpload(user.ID)
-	
-	initialRep, _ := service.GetUser(user.ID)
-	
+
+	initialUser, _ := service.GetUser(user.ID)
+	initialRep := initialUser.Reputation // capture value, not pointer
+
 	err := service.RecordDownload(user.ID)
 	if err != nil {
 		t.Fatalf("RecordDownload failed: %v", err)
 	}
-	
+
 	updated, _ := service.GetUser(user.ID)
-	
+
 	if updated.TotalDownloads != 1 {
 		t.Errorf("TotalDownloads = %d; want 1", updated.TotalDownloads)
 	}
-	
-	if updated.Reputation >= initialRep.Reputation {
-		t.Errorf("Reputation should decrease after download")
+
+	if updated.Reputation >= initialRep {
+		t.Errorf("Reputation should decrease after download: was %d, now %d", initialRep, updated.Reputation)
 	}
 }
 
 func TestGetLeaderboard(t *testing.T) {
 	service, _ := setupUserTest()
-	
+
 	// Create users with different reputations
 	u1, _ := service.CreateUser("user1", "u1@test.com", "pass")
 	u2, _ := service.CreateUser("user2", "u2@test.com", "pass")
 	u3, _ := service.CreateUser("user3", "u3@test.com", "pass")
-	
+
 	// Give them different upload counts
 	for i := 0; i < 5; i++ {
 		service.RecordUpload(u1.ID)
@@ -225,16 +226,16 @@ func TestGetLeaderboard(t *testing.T) {
 		service.RecordUpload(u2.ID)
 	}
 	service.RecordUpload(u3.ID)
-	
+
 	leaders, err := service.GetLeaderboard(3)
 	if err != nil {
 		t.Fatalf("GetLeaderboard failed: %v", err)
 	}
-	
+
 	if len(leaders) != 3 {
 		t.Errorf("Leaderboard size = %d; want 3", len(leaders))
 	}
-	
+
 	// Check order (highest first)
 	if leaders[0].TotalUploads < leaders[1].TotalUploads {
 		t.Error("Leaderboard not sorted correctly")

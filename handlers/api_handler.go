@@ -68,6 +68,11 @@ type RateResourceRequest struct {
 	Comment string  `json:"comment"`
 }
 
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 // writeJSON is a helper for JSON responses
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -84,6 +89,37 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // ============================================================================
+// AUTH ENDPOINTS
+// ============================================================================
+
+// Login handles POST /api/auth/login
+func (h *APIHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var req LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON: "+err.Error())
+		return
+	}
+
+	users, err := h.userService.GetAllUsers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	for _, user := range users {
+		if user.Username == req.Username {
+			writeSuccess(w, map[string]interface{}{
+				"user":  user,
+				"token": "demo-jwt-token-" + string(user.ID),
+			})
+			return
+		}
+	}
+
+	writeError(w, http.StatusUnauthorized, "Invalid username or password")
+}
+
+// ============================================================================
 // USER ENDPOINTS
 // ============================================================================
 
@@ -91,7 +127,6 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func (h *APIHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req CreateUserRequest
 	
-	// JSON Unmarshal - decode request body
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid JSON: "+err.Error())
 		return
@@ -103,7 +138,6 @@ func (h *APIHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// JSON Marshal - encode response (automatic via writeJSON)
 	writeSuccess(w, user)
 }
 
@@ -326,15 +360,16 @@ func (h *APIHandler) RateResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	// Get resource to find uploader
 	resource, err := h.libraryService.GetResource(resourceID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
 	
-	// Add rating
 	resource.AddRating(models.Rating(req.Rating))
+	
+	// Update uploader reputation based on rating
+	h.reputationService.RecalculateAll()
 	
 	writeSuccess(w, map[string]interface{}{
 		"resource_id": resourceID,
@@ -342,9 +377,56 @@ func (h *APIHandler) RateResource(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetAllResources handles GET /api/resources
+func (h *APIHandler) GetAllResources(w http.ResponseWriter, r *http.Request) {
+	results, err := h.searchService.Search("", services.SearchFilters{Page: 1, PageSize: 100})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, results)
+}
+
+// GetLibraryStats handles GET /api/library/stats
+func (h *APIHandler) GetLibraryStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.libraryService.GetStatistics()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, stats)
+}
+
+// GetPeers handles GET /api/peers
+func (h *APIHandler) GetPeers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.userService.GetAllUsers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	
+	peers := make([]map[string]interface{}, 0)
+	for _, u := range users {
+		peers = append(peers, map[string]interface{}{
+			"id":               u.PeerID,
+			"user_id":          u.ID,
+			"username":         u.Username,
+			"status":           u.Status,
+			"reputation":       u.Reputation,
+			"classification":   u.Classification,
+			"shared_resources": u.TotalUploads,
+			"ip_address":       u.IPAddress,
+		})
+	}
+	writeSuccess(w, peers)
+}
+
 // SetupRoutes configures all API routes
 func (h *APIHandler) SetupRoutes(r *mux.Router) {
 	api := r.PathPrefix("/api").Subrouter()
+	
+	// Auth
+	api.HandleFunc("/auth/login", h.Login).Methods("POST")
 	
 	// Users
 	api.HandleFunc("/users", h.CreateUser).Methods("POST")
@@ -354,6 +436,7 @@ func (h *APIHandler) SetupRoutes(r *mux.Router) {
 	api.HandleFunc("/leaderboard", h.GetLeaderboard).Methods("GET")
 	
 	// Resources
+	api.HandleFunc("/resources", h.GetAllResources).Methods("GET")
 	api.HandleFunc("/resources", h.CreateResource).Methods("POST")
 	api.HandleFunc("/resources/popular", h.GetPopularResources).Methods("GET")
 	api.HandleFunc("/resources/recent", h.GetRecentResources).Methods("GET")
@@ -367,4 +450,8 @@ func (h *APIHandler) SetupRoutes(r *mux.Router) {
 	
 	// Stats
 	api.HandleFunc("/stats", h.GetNetworkStats).Methods("GET")
+	api.HandleFunc("/library/stats", h.GetLibraryStats).Methods("GET")
+	
+	// Peers
+	api.HandleFunc("/peers", h.GetPeers).Methods("GET")
 }
